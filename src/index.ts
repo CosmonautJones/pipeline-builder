@@ -93,6 +93,13 @@ export type { HumanInterface, ConversationMessage } from "./conversation/index.j
 // ── Templates ───────────────────────────────────────────────────────
 export { TemplateRegistry } from "./templates/index.js";
 
+// ── Integrations (Claude Code, Cursor, MCP Server) ─────────────────
+export { startMCPServer } from "./integrations/mcp-server.js";
+export { generateClaudeMd, exportClaudeMd } from "./integrations/claude-md-export.js";
+export { generateCursorRules, exportCursorRules } from "./integrations/cursor-rules-export.js";
+export { generateClaudeCodeHooks, exportClaudeCodeHooks } from "./integrations/claude-code-hooks.js";
+export type { ClaudeCodeSettings, ClaudeCodeHook } from "./integrations/claude-code-hooks.js";
+
 // ── Persistence ─────────────────────────────────────────────────────
 export { PipelineStore } from "./persistence/index.js";
 

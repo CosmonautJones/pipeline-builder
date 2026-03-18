@@ -5,6 +5,7 @@ import { runCommand } from "./commands/run.js";
 import { validateCommand } from "./commands/validate.js";
 import { listCommand } from "./commands/list.js";
 import { initCommand } from "./commands/init.js";
+import { exportCommand } from "./commands/export.js";
 
 const program = new Command();
 
@@ -51,5 +52,21 @@ program
   .description("Initialize pipeline builder in a project")
   .option("-d, --dir <path>", "Directory for pipeline files", "./.pipelines")
   .action(initCommand);
+
+program
+  .command("export")
+  .description("Export pipeline as Claude Code / Cursor configuration")
+  .argument("<pipeline>", "Path to pipeline YAML/JSON file")
+  .requiredOption("-t, --target <target>", "Export target: claude-md, cursor-rules, claude-hooks, or all")
+  .option("-o, --output <path>", "Custom output path")
+  .action(exportCommand);
+
+program
+  .command("serve")
+  .description("Start pipeline-builder as an MCP server (for Claude Code / Cursor)")
+  .action(async () => {
+    const { startMCPServer } = await import("../integrations/mcp-server.js");
+    await startMCPServer();
+  });
 
 program.parse();
