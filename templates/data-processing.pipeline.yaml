@@ -1,0 +1,98 @@
+apiVersion: pipeline-builder/v1
+metadata:
+  name: Data Processing Pipeline
+  version: "1.0.0"
+  description: ETL pipeline for extracting, transforming, and loading data
+  tags:
+    - data
+    - etl
+    - processing
+
+variables:
+  - name: source_url
+    type: string
+    description: Data source URL or path
+    required: true
+  - name: output_path
+    type: string
+    description: Output destination path
+    required: true
+  - name: format
+    type: string
+    description: Output data format
+    default: json
+
+trigger:
+  type: manual
+
+nodes:
+  - id: extract
+    name: Extract Data
+    type: action
+    tool: fetch:get
+    toolInput:
+      url: "{{ source_url }}"
+    outputs:
+      - name: raw_data
+        type: object
+        description: Raw extracted data
+
+  - id: validate-input
+    name: Validate Input Data
+    type: action
+    tool: shell:exec
+    toolInput:
+      command: echo "Validating data schema..."
+    dependsOn:
+      - extract
+
+  - id: transform
+    name: Transform Data
+    type: transform
+    description: Apply data transformations
+    dependsOn:
+      - validate-input
+    outputs:
+      - name: transformed_data
+        type: object
+
+  - id: validate-output
+    name: Validate Output Data
+    type: action
+    tool: shell:exec
+    toolInput:
+      command: echo "Validating output schema..."
+    dependsOn:
+      - transform
+
+  - id: load
+    name: Load Data
+    type: action
+    tool: filesystem:write
+    toolInput:
+      path: "{{ output_path }}"
+      format: "{{ format }}"
+    dependsOn:
+      - validate-output
+
+  - id: notify
+    name: Send Completion Notification
+    type: action
+    tool: shell:exec
+    toolInput:
+      command: echo "ETL pipeline complete"
+    dependsOn:
+      - load
+    errorPolicy: skip
+
+edges:
+  - from: extract
+    to: validate-input
+  - from: validate-input
+    to: transform
+  - from: transform
+    to: validate-output
+  - from: validate-output
+    to: load
+  - from: load
+    to: notify

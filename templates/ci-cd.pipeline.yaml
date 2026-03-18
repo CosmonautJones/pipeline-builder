@@ -1,0 +1,143 @@
+apiVersion: pipeline-builder/v1
+metadata:
+  name: CI/CD Pipeline
+  version: "1.0.0"
+  description: Continuous integration and deployment pipeline with test, build, and deploy stages
+  tags:
+    - ci
+    - cd
+    - deployment
+
+variables:
+  - name: branch
+    type: string
+    description: Git branch to build
+    default: main
+  - name: registry
+    type: string
+    description: Container registry URL
+    required: true
+  - name: environment
+    type: string
+    description: Target deployment environment
+    default: staging
+
+secrets:
+  - REGISTRY_PASSWORD
+  - DEPLOY_TOKEN
+
+trigger:
+  type: webhook
+  config:
+    event: push
+
+nodes:
+  - id: checkout
+    name: Checkout Code
+    type: action
+    tool: git:checkout
+    toolInput:
+      branch: "{{ branch }}"
+
+  - id: install-deps
+    name: Install Dependencies
+    type: action
+    tool: shell:exec
+    toolInput:
+      command: npm ci
+    dependsOn:
+      - checkout
+
+  - id: lint
+    name: Run Linter
+    type: action
+    tool: shell:exec
+    toolInput:
+      command: npm run lint
+    dependsOn:
+      - install-deps
+    errorPolicy: skip
+
+  - id: test
+    name: Run Tests
+    type: action
+    tool: shell:exec
+    toolInput:
+      command: npm test
+    dependsOn:
+      - install-deps
+    retry:
+      maxAttempts: 2
+      backoffMs: 5000
+
+  - id: build
+    name: Build Application
+    type: action
+    tool: shell:exec
+    toolInput:
+      command: npm run build
+    dependsOn:
+      - lint
+      - test
+
+  - id: docker-build
+    name: Build Docker Image
+    type: action
+    tool: shell:exec
+    toolInput:
+      command: "docker build -t {{ registry }}/app:{{ branch }} ."
+    dependsOn:
+      - build
+
+  - id: docker-push
+    name: Push Docker Image
+    type: action
+    tool: shell:exec
+    toolInput:
+      command: "docker push {{ registry }}/app:{{ branch }}"
+    dependsOn:
+      - docker-build
+    retry:
+      maxAttempts: 3
+      backoffMs: 2000
+
+  - id: deploy-approval
+    name: Deployment Approval
+    type: human-review
+    humanReview:
+      prompt: "Approve deployment of {{ branch }} to {{ environment }}?"
+      approvalRequired: true
+    dependsOn:
+      - docker-push
+
+  - id: deploy
+    name: Deploy to Environment
+    type: action
+    tool: shell:exec
+    toolInput:
+      command: "kubectl apply -f k8s/ --namespace={{ environment }}"
+    dependsOn:
+      - deploy-approval
+    retry:
+      maxAttempts: 2
+      backoffMs: 10000
+
+edges:
+  - from: checkout
+    to: install-deps
+  - from: install-deps
+    to: lint
+  - from: install-deps
+    to: test
+  - from: lint
+    to: build
+  - from: test
+    to: build
+  - from: build
+    to: docker-build
+  - from: docker-build
+    to: docker-push
+  - from: docker-push
+    to: deploy-approval
+  - from: deploy-approval
+    to: deploy

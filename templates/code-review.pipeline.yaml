@@ -1,0 +1,131 @@
+apiVersion: pipeline-builder/v1
+metadata:
+  name: Code Review Pipeline
+  version: "1.0.0"
+  description: Automated code review with linting, testing, and human approval
+  tags:
+    - code
+    - review
+    - quality
+
+variables:
+  - name: pr_number
+    type: string
+    description: Pull request number
+    required: true
+  - name: repo
+    type: string
+    description: Repository name
+    required: true
+
+trigger:
+  type: event
+  config:
+    event: pull_request.opened
+
+nodes:
+  - id: fetch-pr
+    name: Fetch PR Changes
+    type: action
+    tool: github:get_pr
+    toolInput:
+      repo: "{{ repo }}"
+      pr: "{{ pr_number }}"
+    outputs:
+      - name: diff
+        type: string
+      - name: files_changed
+        type: array
+
+  - id: lint-check
+    name: Run Linters
+    type: action
+    tool: shell:exec
+    toolInput:
+      command: npm run lint
+    dependsOn:
+      - fetch-pr
+    errorPolicy: skip
+
+  - id: type-check
+    name: Run Type Checker
+    type: action
+    tool: shell:exec
+    toolInput:
+      command: npm run typecheck
+    dependsOn:
+      - fetch-pr
+    errorPolicy: skip
+
+  - id: test-check
+    name: Run Tests
+    type: action
+    tool: shell:exec
+    toolInput:
+      command: npm test
+    dependsOn:
+      - fetch-pr
+    retry:
+      maxAttempts: 2
+
+  - id: ai-review
+    name: AI Code Review
+    type: action
+    tool: ai:review
+    toolInput:
+      prompt: "Review this code change for bugs, security issues, and best practices"
+    dependsOn:
+      - fetch-pr
+    outputs:
+      - name: review_comments
+        type: array
+
+  - id: aggregate-results
+    name: Aggregate Results
+    type: aggregator
+    dependsOn:
+      - lint-check
+      - type-check
+      - test-check
+      - ai-review
+
+  - id: human-review
+    name: Human Reviewer Approval
+    type: human-review
+    humanReview:
+      prompt: "Review the automated checks and AI review. Approve this PR?"
+      approvalRequired: true
+    dependsOn:
+      - aggregate-results
+
+  - id: post-review
+    name: Post Review Comments
+    type: action
+    tool: github:create_review
+    toolInput:
+      repo: "{{ repo }}"
+      pr: "{{ pr_number }}"
+    dependsOn:
+      - human-review
+
+edges:
+  - from: fetch-pr
+    to: lint-check
+  - from: fetch-pr
+    to: type-check
+  - from: fetch-pr
+    to: test-check
+  - from: fetch-pr
+    to: ai-review
+  - from: lint-check
+    to: aggregate-results
+  - from: type-check
+    to: aggregate-results
+  - from: test-check
+    to: aggregate-results
+  - from: ai-review
+    to: aggregate-results
+  - from: aggregate-results
+    to: human-review
+  - from: human-review
+    to: post-review

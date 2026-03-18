@@ -1,0 +1,98 @@
+apiVersion: pipeline-builder/v1
+metadata:
+  name: Content Generation Pipeline
+  version: "1.0.0"
+  description: AI-assisted content creation with review and publishing
+  tags:
+    - content
+    - ai
+    - generation
+
+variables:
+  - name: topic
+    type: string
+    description: Content topic or brief
+    required: true
+  - name: style
+    type: string
+    description: Writing style (blog, technical, marketing)
+    default: blog
+  - name: platform
+    type: string
+    description: Publishing platform
+    default: website
+
+trigger:
+  type: manual
+
+nodes:
+  - id: research
+    name: Research Topic
+    type: action
+    tool: fetch:search
+    toolInput:
+      query: "{{ topic }}"
+    outputs:
+      - name: research_results
+        type: array
+
+  - id: outline
+    name: Generate Outline
+    type: action
+    tool: ai:generate
+    toolInput:
+      prompt: "Create an outline for a {{ style }} post about {{ topic }}"
+    dependsOn:
+      - research
+    outputs:
+      - name: outline
+        type: string
+
+  - id: draft
+    name: Write Draft
+    type: action
+    tool: ai:generate
+    toolInput:
+      prompt: "Write a full {{ style }} post based on the provided outline"
+    dependsOn:
+      - outline
+    outputs:
+      - name: draft
+        type: string
+
+  - id: review
+    name: Human Review
+    type: human-review
+    humanReview:
+      prompt: "Review the generated content. Approve, or provide feedback for revision."
+      approvalRequired: true
+    dependsOn:
+      - draft
+
+  - id: format
+    name: Format for Platform
+    type: transform
+    description: Format content for the target platform
+    dependsOn:
+      - review
+
+  - id: publish
+    name: Publish Content
+    type: action
+    tool: shell:exec
+    toolInput:
+      command: echo "Publishing to {{ platform }}..."
+    dependsOn:
+      - format
+
+edges:
+  - from: research
+    to: outline
+  - from: outline
+    to: draft
+  - from: draft
+    to: review
+  - from: review
+    to: format
+  - from: format
+    to: publish
