@@ -1,186 +1,24 @@
-import type { PipelineDefinition } from "../types/pipeline.js";
 import { TemplateRegistry } from "../templates/index.js";
 import { writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
-import { PipelineDefinitionSchema } from "../schema/pipeline.js";
 
 /**
- * Subscription-only plan mode.
+ * Subscription-only plan mode — multi-file architecture.
  *
- * Instead of calling the Anthropic API directly, this generates instruction
- * files that teach Claude Code (CLAUDE.md) or Cursor (.cursor/rules) HOW
- * to design pipelines themselves — using the user's existing subscription.
+ * Instead of one massive CLAUDE.md, generates:
+ *   CLAUDE.md                              (~40 lines — goal + TOC + commands)
+ *   .pipeline-builder/docs/schema.md       (YAML schema reference)
+ *   .pipeline-builder/docs/methodology.md  (design methodology)
+ *   .pipeline-builder/docs/node-types.md   (node type guide)
+ *   .pipeline-builder/docs/template.md     (matched template example)
+ *   .pipeline-builder/docs/rules.md        (validation rules)
  *
- * The flow:
- * 1. User runs: `pb plan "deploy my app" --subscription`
- * 2. We generate a CLAUDE.md with:
- *    - The pipeline schema reference
- *    - The design methodology (clarify → plan → architect → build → validate)
- *    - Relevant template examples
- *    - The user's specific goal
- *    - Instructions to write the YAML and validate with `pb validate`
- * 3. User opens Claude Code / Cursor and says "design the pipeline"
- * 4. The AI follows the instructions, writes the YAML, validates it
+ * For Cursor, generates multiple focused .mdc rule files.
  *
- * No API key needed. The AI subscription does the work.
+ * The AI reads the slim entry point and pulls in reference docs as needed.
  */
-
-const SCHEMA_REFERENCE = `
-## Pipeline YAML Schema
-
-\`\`\`yaml
-apiVersion: pipeline-builder/v1   # Required, always this value
-
-metadata:
-  name: string                     # Pipeline name
-  version: string                  # Semver (default: "1.0.0")
-  description: string              # What this pipeline does
-  tags: string[]                   # Categorization tags
-
-# Variables the user provides at runtime
-variables:
-  - name: string                   # Variable name
-    type: string | number | boolean | object | secret
-    description: string            # What this variable is for
-    default: any                   # Default value (omit for required)
-    required: boolean              # Is this required? (default: true)
-
-# Secret names (values provided at runtime, NEVER in the file)
-secrets: string[]
-
-# How the pipeline starts
-trigger:
-  type: manual | cron | webhook | event | file-watch
-  config: {}                       # Type-specific config
-
-# Pipeline nodes (vertices of the DAG)
-nodes:
-  - id: string                     # Unique, lowercase-kebab-case
-    name: string                   # Human-readable name
-    type: action | condition | transform | human-review | sub-pipeline | trigger | aggregator
-    description: string
-
-    # For action nodes — what tool to call
-    tool: "server:tool_name"       # MCP tool identifier
-    toolInput:                     # Parameters (use {{ var }} for templates)
-      key: value
-
-    # Dependencies
-    dependsOn: [node_id, ...]      # Nodes that must complete first
-
-    # Data flow
-    inputMappings:                 # Where inputs come from
-      param: "nodes.prev_step.outputs.field"
-      param: "variables.var_name"
-
-    inputs:                        # Input port declarations
-      - name: string
-        type: string | number | boolean | object | array | any
-    outputs:                       # Output port declarations
-      - name: string
-        type: string | number | boolean | object | array | any
-
-    # Conditional execution
-    condition: "{{ var }} == 'value'"
-
-    # Human review gate
-    humanReview:
-      prompt: string               # Question to ask the human
-      approvalRequired: true
-
-    # Policies
-    retry:
-      maxAttempts: number          # How many times to retry (default: 1)
-      backoffMs: number            # Wait between retries (default: 1000)
-      backoffMultiplier: number    # Exponential backoff (default: 2)
-    errorPolicy: fail | skip       # fail = stop pipeline, skip = continue
-    timeoutMs: number              # Max execution time for this node
-
-# Explicit edges (alternative to dependsOn for port-level routing)
-edges:
-  - from: node_id
-    to: node_id
-    condition: string              # Optional guard expression
-
-# MCP servers this pipeline needs
-mcpServers:
-  - name: string
-    command: string                # e.g., "npx"
-    args: string[]                 # e.g., ["-y", "@modelcontextprotocol/server-github"]
-    env: { KEY: "value" }
-    transport: stdio | streamable-http
-\`\`\`
-`;
-
-const DESIGN_METHODOLOGY = `
-## Pipeline Design Methodology
-
-When the user asks you to design a pipeline, follow these steps IN ORDER:
-
-### Step 1: Clarify (if needed)
-Ask the user 2-3 targeted questions if the goal is ambiguous:
-- What specific tools/platforms are involved?
-- What triggers the pipeline?
-- Are there approval gates needed?
-- What happens on failure?
-
-If the goal is clear, skip to Step 2.
-
-### Step 2: Decompose
-Break the goal into ordered sub-tasks:
-1. List every step needed from start to finish
-2. Identify which steps depend on which
-3. Identify which steps can run in parallel
-4. Note where human review is needed
-
-### Step 3: Design the DAG
-Map sub-tasks to pipeline nodes:
-- Entry point → \`trigger\` node
-- Tool calls → \`action\` nodes with \`tool: "shell:exec"\` and appropriate commands
-- Approval gates → \`human-review\` nodes
-- Branching logic → \`condition\` nodes
-- Joining parallel branches → \`aggregator\` nodes
-- Data transformation → \`transform\` nodes
-
-### Step 4: Generate the YAML
-Write the complete pipeline YAML following the schema above.
-Save it to \`.pipelines/<name>.pipeline.yaml\`.
-
-### Step 5: Validate
-Run: \`pb validate .pipelines/<name>.pipeline.yaml\`
-Fix any errors reported.
-
-### Step 6: Present to User
-Show the pipeline structure, explain the execution order, and ask for approval.
-`;
-
-const NODE_TYPE_GUIDE = `
-## Node Type Decision Guide
-
-| When you need to...                  | Use type        |
-|--------------------------------------|-----------------|
-| Start the pipeline                   | \`trigger\`     |
-| Run a command or call a tool         | \`action\`      |
-| Branch based on a condition          | \`condition\`   |
-| Transform data between steps         | \`transform\`   |
-| Pause for human approval             | \`human-review\`|
-| Run another pipeline                 | \`sub-pipeline\`|
-| Join parallel branches               | \`aggregator\`  |
-
-### Common action patterns:
-- Shell command: \`tool: "shell:exec"\`, \`toolInput: { command: "npm test" }\`
-- Git operation: \`tool: "git:checkout"\`, \`toolInput: { branch: "{{ branch }}" }\`
-- API call: \`tool: "fetch:get"\`, \`toolInput: { url: "{{ api_url }}" }\`
-- File operation: \`tool: "filesystem:write"\`, \`toolInput: { path: "..." }\`
-
-### When to use human-review:
-- Before deploying to production
-- Before deleting data
-- Before sending external notifications
-- Before any irreversible action
-`;
 
 export interface SubscriptionPlanOptions {
   goal: string;
@@ -189,144 +27,339 @@ export interface SubscriptionPlanOptions {
   target?: "claude-code" | "cursor" | "both";
 }
 
-/**
- * Generate instruction files that teach Claude Code / Cursor how to
- * design a pipeline for the user's goal.
- */
+// ── Document chunks ─────────────────────────────────────────────────
+
+const METHODOLOGY = `# Pipeline Design Methodology
+
+Follow these steps IN ORDER when designing a pipeline:
+
+## Step 1: Clarify (if needed)
+Ask 2-3 targeted questions if the goal is ambiguous:
+- What tools/platforms are involved?
+- What triggers the pipeline?
+- Are there approval gates needed?
+
+Skip this if the goal is already clear.
+
+## Step 2: Decompose
+Break the goal into ordered sub-tasks:
+1. List every step from start to finish
+2. Identify dependencies (which steps need which)
+3. Identify parallelism (independent steps)
+4. Note where human review is needed
+
+## Step 3: Design the DAG
+Map sub-tasks to pipeline nodes:
+- Entry point → \`trigger\` node
+- Tool calls → \`action\` nodes
+- Approval gates → \`human-review\` nodes
+- Branching → \`condition\` nodes
+- Joining branches → \`aggregator\` nodes
+
+## Step 4: Write the YAML
+Generate the pipeline YAML in \`.pipelines/<name>.pipeline.yaml\`.
+Follow the schema in \`.pipeline-builder/docs/schema.md\`.
+
+## Step 5: Validate
+\`\`\`bash
+pb validate .pipelines/<name>.pipeline.yaml
+\`\`\`
+Fix any errors, then present the pipeline to the user.
+`;
+
+const SCHEMA = `# Pipeline YAML Schema Reference
+
+\`\`\`yaml
+apiVersion: pipeline-builder/v1
+
+metadata:
+  name: string                     # Pipeline name
+  version: "1.0.0"                 # Semver
+  description: string              # What this pipeline does
+  tags: [string]                   # Categorization
+
+variables:                         # User-provided at runtime
+  - name: string
+    type: string | number | boolean | object | secret
+    description: string
+    default: any                   # Omit for required vars
+    required: boolean
+
+secrets: [string]                  # Secret names (NEVER store values)
+
+trigger:
+  type: manual | cron | webhook | event | file-watch
+  config: {}
+
+nodes:                             # DAG vertices
+  - id: lowercase-kebab-case       # Unique node ID
+    name: string                   # Human-readable
+    type: action | condition | transform | human-review | sub-pipeline | trigger | aggregator
+    tool: "server:tool_name"       # For action nodes
+    toolInput:                     # Use {{ var }} for templates
+      command: "npm test"
+    dependsOn: [node_id]           # Must complete first
+    inputMappings:                 # Data flow from other nodes
+      param: "nodes.prev.outputs.field"
+      param: "variables.var_name"
+    condition: "{{ var }} == 'value'"  # For condition nodes
+    humanReview:                   # For human-review nodes
+      prompt: "Approve?"
+      approvalRequired: true
+    retry:                         # Retry policy
+      maxAttempts: 3
+      backoffMs: 1000
+      backoffMultiplier: 2
+    errorPolicy: fail | skip       # fail = stop, skip = continue
+    timeoutMs: 30000
+
+edges:                             # Explicit connections (alt to dependsOn)
+  - from: node_id
+    to: node_id
+    condition: string              # Optional guard
+
+mcpServers:                        # Required MCP servers
+  - name: string
+    command: "npx"
+    args: ["-y", "package-name"]
+    transport: stdio
+\`\`\`
+`;
+
+const NODE_TYPES = `# Node Type Guide
+
+| Need to...                       | Use type        | Example                          |
+|----------------------------------|-----------------|----------------------------------|
+| Start the pipeline               | \`trigger\`     | Webhook, cron, manual start      |
+| Run a command or tool            | \`action\`      | \`npm test\`, API call, deploy   |
+| Branch on a condition            | \`condition\`   | if env == "production"           |
+| Transform data between steps     | \`transform\`   | Format output for next step      |
+| Pause for human approval         | \`human-review\`| Before deploy, before delete     |
+| Run another pipeline             | \`sub-pipeline\`| Reusable sub-workflows           |
+| Join parallel branches           | \`aggregator\`  | Collect results from parallel    |
+
+## Common action patterns
+
+\`\`\`yaml
+# Shell command
+- id: run-tests
+  type: action
+  tool: "shell:exec"
+  toolInput: { command: "npm test" }
+
+# With retry for flaky operations
+- id: deploy
+  type: action
+  tool: "shell:exec"
+  toolInput: { command: "kubectl apply -f k8s/" }
+  retry: { maxAttempts: 3, backoffMs: 2000 }
+
+# Human gate before destructive ops
+- id: approve-deploy
+  type: human-review
+  humanReview:
+    prompt: "Deploy to {{ environment }}?"
+    approvalRequired: true
+
+# Parallel steps (same dependsOn)
+- id: lint
+  type: action
+  tool: "shell:exec"
+  toolInput: { command: "npm run lint" }
+  dependsOn: [checkout]
+  errorPolicy: skip              # Non-blocking
+
+- id: test
+  type: action
+  tool: "shell:exec"
+  toolInput: { command: "npm test" }
+  dependsOn: [checkout]          # Same dep = parallel with lint
+\`\`\`
+`;
+
+const RULES = `# Pipeline Rules
+
+1. Node IDs must be \`lowercase-kebab-case\`
+2. Every \`action\` node must have a \`tool\` field (use \`shell:exec\` as fallback)
+3. Use \`{{ variable_name }}\` for dynamic values in toolInput
+4. Place \`human-review\` nodes before destructive operations (deploy, delete, publish)
+5. Add \`retry\` policies to network-dependent steps
+6. Never hardcode secrets — use the \`secrets\` array
+7. Maximize parallelism — if steps are independent, don't chain them
+8. Run \`pb validate\` after generating to catch structural errors
+
+## Validation commands
+
+\`\`\`bash
+pb validate .pipelines/<name>.pipeline.yaml          # Check structure
+pb run .pipelines/<name>.pipeline.yaml --dry-run     # Simulate execution
+pb export .pipelines/<name>.pipeline.yaml -t all     # Export to tool configs
+\`\`\`
+`;
+
+// ── Generator ───────────────────────────────────────────────────────
+
 export async function generateSubscriptionPlan(
   options: SubscriptionPlanOptions,
 ): Promise<{ files: string[]; instructions: string }> {
   const files: string[] = [];
   const outputDir = options.outputDir ?? ".";
   const target = options.target ?? "both";
+  const docsDir = join(outputDir, ".pipeline-builder", "docs");
 
-  // Load relevant template as an example
+  // Ensure directories exist
+  if (!existsSync(docsDir)) await mkdir(docsDir, { recursive: true });
+  const pipelinesDir = join(outputDir, ".pipelines");
+  if (!existsSync(pipelinesDir)) await mkdir(pipelinesDir, { recursive: true });
+
+  // Load relevant template
   const registry = new TemplateRegistry();
-  let templateExample = "";
+  let templateContent = "";
+  let templateName = "";
+
   if (options.templateHint) {
     try {
-      const template = await registry.load(options.templateHint);
-      templateExample = `
-## Starting Template
-
-Here's a relevant template to build from. Modify it to match the goal:
-
-\`\`\`yaml
-${YAML.stringify(template, { indent: 2 })}
-\`\`\`
-`;
-    } catch {
-      // Template not found, that's fine
-    }
+      const t = await registry.load(options.templateHint);
+      templateContent = YAML.stringify(t, { indent: 2 });
+      templateName = options.templateHint;
+    } catch { /* not found */ }
   }
 
-  // Find closest template by keyword matching
-  if (!templateExample) {
+  if (!templateContent) {
     const templates = registry.list();
     const goalLower = options.goal.toLowerCase();
     const match = templates.find(t =>
-      t.tags.some(tag => goalLower.includes(tag)) ||
-      goalLower.includes(t.id)
+      t.tags.some(tag => goalLower.includes(tag)) || goalLower.includes(t.id)
     );
     if (match) {
       try {
-        const template = await registry.load(match.id);
-        templateExample = `
-## Closest Template (${match.name})
-
-Here's the closest built-in template. Use it as inspiration:
-
-\`\`\`yaml
-${YAML.stringify(template, { indent: 2 })}
-\`\`\`
-`;
-      } catch {
-        // ignore
-      }
+        const t = await registry.load(match.id);
+        templateContent = YAML.stringify(t, { indent: 2 });
+        templateName = match.name;
+      } catch { /* ignore */ }
     }
   }
 
-  // Build the content
-  const content = `# Pipeline Builder — Design Task
+  // ── Write reference docs ────────────────────────────────────────
 
-## Your Goal
+  await writeFile(join(docsDir, "methodology.md"), METHODOLOGY, "utf-8");
+  await writeFile(join(docsDir, "schema.md"), SCHEMA, "utf-8");
+  await writeFile(join(docsDir, "node-types.md"), NODE_TYPES, "utf-8");
+  await writeFile(join(docsDir, "rules.md"), RULES, "utf-8");
+  files.push(
+    join(docsDir, "methodology.md"),
+    join(docsDir, "schema.md"),
+    join(docsDir, "node-types.md"),
+    join(docsDir, "rules.md"),
+  );
 
-Design and generate a pipeline YAML file for the following:
+  if (templateContent) {
+    const templateDoc = `# Template: ${templateName}\n\nUse as a starting point. Modify to match the goal.\n\n\`\`\`yaml\n${templateContent}\`\`\`\n`;
+    await writeFile(join(docsDir, "template.md"), templateDoc, "utf-8");
+    files.push(join(docsDir, "template.md"));
+  }
+
+  // ── Generate CLAUDE.md (slim entry point) ───────────────────────
+
+  if (target === "claude-code" || target === "both") {
+    const claudeMd = `# Pipeline Builder — Design Task
+
+## Goal
 
 > **${options.goal}**
 
-Save the generated pipeline to \`.pipelines/\` when complete.
-After writing the YAML, validate it by running: \`pb validate .pipelines/<name>.pipeline.yaml\`
+## What to do
 
-${DESIGN_METHODOLOGY}
+Design a pipeline YAML and save it to \`.pipelines/<name>.pipeline.yaml\`.
 
-${SCHEMA_REFERENCE}
+## Reference docs
 
-${NODE_TYPE_GUIDE}
+Read these as needed (in \`.pipeline-builder/docs/\`):
 
-${templateExample}
+| Doc | When to read |
+|-----|-------------|
+| [methodology.md](.pipeline-builder/docs/methodology.md) | Start here — the 5-step design process |
+| [schema.md](.pipeline-builder/docs/schema.md) | When writing the YAML — field reference |
+| [node-types.md](.pipeline-builder/docs/node-types.md) | When choosing node types — examples |
+| [rules.md](.pipeline-builder/docs/rules.md) | Before finalizing — validation checklist |
+${templateContent ? `| [template.md](.pipeline-builder/docs/template.md) | Closest built-in template to start from |` : ""}
 
-## Validation Commands
+## Quick start
 
-After generating the pipeline YAML:
-
-\`\`\`bash
-# Validate structure
-pb validate .pipelines/<name>.pipeline.yaml
-
-# Dry-run execution (simulates without running tools)
-pb run .pipelines/<name>.pipeline.yaml --dry-run
-
-# Export to tool configs
-pb export .pipelines/<name>.pipeline.yaml -t all
-\`\`\`
-
-## Important Rules
-
-1. All node IDs must be lowercase-kebab-case
-2. Every action node must have a \`tool\` field (use \`shell:exec\` as fallback)
-3. Use \`{{ variable_name }}\` for dynamic values in toolInput
-4. Place \`human-review\` nodes before destructive operations
-5. Add \`retry\` policies to network-dependent steps
-6. Never hardcode secrets — use the \`secrets\` array
-7. Maximize parallelism — if steps are independent, don't chain them sequentially
+1. Read \`.pipeline-builder/docs/methodology.md\`
+2. Follow the 5 steps (clarify → decompose → design → write → validate)
+3. Save to \`.pipelines/\`
+4. Run: \`pb validate .pipelines/<name>.pipeline.yaml\`
 `;
 
-  // Generate CLAUDE.md
-  if (target === "claude-code" || target === "both") {
     const claudePath = join(outputDir, "CLAUDE.md");
-    await writeFile(claudePath, content, "utf-8");
+    await writeFile(claudePath, claudeMd, "utf-8");
     files.push(claudePath);
   }
 
-  // Generate Cursor rules
+  // ── Generate Cursor rules (multiple focused files) ──────────────
+
   if (target === "cursor" || target === "both") {
     const rulesDir = join(outputDir, ".cursor", "rules");
-    if (!existsSync(rulesDir)) {
-      await mkdir(rulesDir, { recursive: true });
-    }
+    if (!existsSync(rulesDir)) await mkdir(rulesDir, { recursive: true });
 
-    const cursorContent = `---
-description: Pipeline design task — generate pipeline YAML for user's goal
+    // Rule 1: Task (always active, slim)
+    const taskRule = `---
+description: "Pipeline design task — the current goal"
 alwaysApply: true
 ---
 
-${content}`;
+# Pipeline Design Task
 
-    const cursorPath = join(rulesDir, "pipeline-design-task.mdc");
-    await writeFile(cursorPath, cursorContent, "utf-8");
-    files.push(cursorPath);
-  }
+**Goal:** ${options.goal}
 
-  // Ensure .pipelines directory exists
-  const pipelinesDir = join(outputDir, ".pipelines");
-  if (!existsSync(pipelinesDir)) {
-    await mkdir(pipelinesDir, { recursive: true });
+Save the pipeline to \`.pipelines/<name>.pipeline.yaml\`.
+Follow the methodology in \`.pipeline-builder/docs/methodology.md\`.
+Validate with: \`pb validate .pipelines/<name>.pipeline.yaml\`
+`;
+    await writeFile(join(rulesDir, "pb-task.mdc"), taskRule, "utf-8");
+
+    // Rule 2: Schema (activates when editing pipeline YAML)
+    const schemaRule = `---
+description: "Pipeline YAML schema reference"
+globs: "**/*.pipeline.yaml,**/*.pipeline.json"
+---
+
+${SCHEMA}
+`;
+    await writeFile(join(rulesDir, "pb-schema.mdc"), schemaRule, "utf-8");
+
+    // Rule 3: Node types (activates when editing pipeline YAML)
+    const nodeRule = `---
+description: "Pipeline node type reference and examples"
+globs: "**/*.pipeline.yaml"
+---
+
+${NODE_TYPES}
+`;
+    await writeFile(join(rulesDir, "pb-nodes.mdc"), nodeRule, "utf-8");
+
+    // Rule 4: Rules (activates when editing pipeline YAML)
+    const rulesRule = `---
+description: "Pipeline validation rules"
+globs: "**/*.pipeline.yaml"
+---
+
+${RULES}
+`;
+    await writeFile(join(rulesDir, "pb-rules.mdc"), rulesRule, "utf-8");
+
+    files.push(
+      join(rulesDir, "pb-task.mdc"),
+      join(rulesDir, "pb-schema.mdc"),
+      join(rulesDir, "pb-nodes.mdc"),
+      join(rulesDir, "pb-rules.mdc"),
+    );
   }
 
   const instructions = target === "cursor"
     ? `Open Cursor and say: "Design the pipeline described in the rules"`
-    : `Open Claude Code and say: "Design the pipeline described in CLAUDE.md"`;
+    : `Open Claude Code and say: "Design the pipeline"`;
 
   return { files, instructions };
 }
