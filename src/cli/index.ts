@@ -6,6 +6,7 @@ import { validateCommand } from "./commands/validate.js";
 import { listCommand } from "./commands/list.js";
 import { initCommand } from "./commands/init.js";
 import { exportCommand } from "./commands/export.js";
+import { visualizeCommand } from "./commands/visualize.js";
 
 const program = new Command();
 
@@ -54,6 +55,13 @@ program
   .description("Initialize pipeline builder in a project")
   .option("-d, --dir <path>", "Directory for pipeline files", "./.pipelines")
   .action(initCommand);
+
+program
+  .command("visualize")
+  .description("Visualize a pipeline's DAG structure")
+  .argument("<pipeline>", "Path to pipeline YAML/JSON file")
+  .option("-c, --compact", "Compact single-line flow view")
+  .action(visualizeCommand);
 
 program
   .command("export")

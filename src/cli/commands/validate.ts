@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import { PipelineStore } from "../../persistence/index.js";
-import { buildDAGFromPipeline, validatePipelineDAG } from "../../dag/index.js";
+import { buildDAGFromPipeline, validatePipelineDAG, visualizeFlow } from "../../dag/index.js";
 
 interface ValidateOptions {
   strict?: boolean;
@@ -29,6 +29,11 @@ export async function validateCommand(pipelinePath: string, options: ValidateOpt
     console.log(`  Entry points: ${dag.getRoots().length}`);
     console.log(`  Exit points: ${dag.getLeaves().length}`);
     console.log(`  Parallel waves: ${groups.length}`);
+    console.log();
+
+    // Show flow visualization
+    console.log(chalk.dim("Flow:"));
+    console.log(`  ${visualizeFlow(dag)}`);
     console.log();
 
     // Show parallel execution plan

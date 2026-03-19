@@ -79,6 +79,17 @@ export { BuilderAgent } from "./agents/builder/index.js";
 export { ValidatorAgent } from "./agents/validator/index.js";
 export { RouterAgent } from "./agents/router/index.js";
 
+// ── LLM Providers ───────────────────────────────────────────────────
+export { createLLMProvider, OllamaProvider, OpenAICompatibleProvider } from "./agents/providers/index.js";
+export type { ProviderConfig } from "./agents/providers/index.js";
+
+// ── DAG Visualization ───────────────────────────────────────────────
+export { visualizeDAG, visualizeFlow } from "./dag/index.js";
+
+// ── Plugin System ───────────────────────────────────────────────────
+export { PluginLoader, shellExecPlugin } from "./plugins/index.js";
+export type { PipelinePlugin } from "./plugins/index.js";
+
 // ── Execution Engine ────────────────────────────────────────────────
 export { PipelineRuntime, StateManager, Scheduler, CheckpointManager } from "./engine/index.js";
 export type { StepHandler, Checkpoint } from "./engine/index.js";

@@ -10,7 +10,8 @@ export type AgentRole =
   | "architect"
   | "builder"
   | "validator"
-  | "router";
+  | "router"
+  | "discovery";
 
 // ── Orchestrator Phases ─────────────────────────────────────────────
 

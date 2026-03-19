@@ -20,6 +20,7 @@ import { ArchitectAgent } from "./architect/index.js";
 import { BuilderAgent } from "./builder/index.js";
 import { ValidatorAgent } from "./validator/index.js";
 import { RouterAgent } from "./router/index.js";
+import { ToolDiscoveryAgent } from "./discovery/index.js";
 
 export interface OrchestratorConfig {
   maxIterationsPerPhase: number;
@@ -78,6 +79,7 @@ export class Orchestrator {
       ["clarifier", new ClarifierAgent(llm)],
       ["planner", new PlannerAgent(llm)],
       ["architect", new ArchitectAgent(llm)],
+      ["discovery", new ToolDiscoveryAgent(llm)],
       ["builder", new BuilderAgent(llm)],
       ["validator", new ValidatorAgent(llm)],
       ["router", new RouterAgent(llm)],
@@ -259,6 +261,8 @@ export class Orchestrator {
     if (!this.context.currentIntent) return "clarifier";
     if (!this.context.currentPlan) return "planner";
     if (!this.context.currentBlueprint) return "architect";
+    // Route to discovery if blueprint has missing capabilities
+    if (this.context.currentBlueprint?.missingCapabilities?.length && !this.context.currentPipeline) return "discovery";
     if (!this.context.currentPipeline) return "builder";
     return "validator";
   }
@@ -267,7 +271,7 @@ export class Orchestrator {
    * Structured progression fallback.
    */
   private fallbackAdvance(current: AgentRole): AgentRole {
-    const progression: AgentRole[] = ["clarifier", "planner", "architect", "builder", "validator"];
+    const progression: AgentRole[] = ["clarifier", "planner", "architect", "discovery", "builder", "validator"];
     const idx = progression.indexOf(current);
     if (idx === -1 || idx >= progression.length - 1) return "validator";
     const next = progression[idx + 1];
@@ -290,6 +294,7 @@ export class Orchestrator {
       clarifier: "clarifying",
       planner: "planning",
       architect: "architecting",
+      discovery: "discovering",
       builder: "building",
       validator: "validating",
       router: "clarifying",
