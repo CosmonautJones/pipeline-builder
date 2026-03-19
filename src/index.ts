@@ -99,6 +99,8 @@ export { generateClaudeMd, exportClaudeMd } from "./integrations/claude-md-expor
 export { generateCursorRules, exportCursorRules } from "./integrations/cursor-rules-export.js";
 export { generateClaudeCodeHooks, exportClaudeCodeHooks } from "./integrations/claude-code-hooks.js";
 export type { ClaudeCodeSettings, ClaudeCodeHook } from "./integrations/claude-code-hooks.js";
+export { generateSubscriptionPlan } from "./integrations/subscription-plan.js";
+export type { SubscriptionPlanOptions } from "./integrations/subscription-plan.js";
 
 // ── Persistence ─────────────────────────────────────────────────────
 export { PipelineStore } from "./persistence/index.js";

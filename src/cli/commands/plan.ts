@@ -13,9 +13,38 @@ interface PlanOptions {
   output: string;
   interactive: boolean;
   dryRun?: boolean;
+  subscription?: boolean;
+  target?: string;
 }
 
 export async function planCommand(goal: string, options: PlanOptions): Promise<void> {
+  // Subscription mode: generate instructions for Claude Code / Cursor
+  if (options.subscription) {
+    const { generateSubscriptionPlan } = await import("../../integrations/subscription-plan.js");
+
+    console.log(chalk.bold.cyan("\n🔧 Pipeline Builder — Subscription Plan Mode\n"));
+    console.log(chalk.dim(`Goal: "${goal}"\n`));
+
+    const target = (options.target as "claude-code" | "cursor" | "both") ?? "both";
+    const result = await generateSubscriptionPlan({
+      goal,
+      templateHint: options.template,
+      target,
+    });
+
+    console.log(chalk.green("Generated instruction files:"));
+    for (const file of result.files) {
+      console.log(chalk.green(`  ✓ ${file}`));
+    }
+    console.log();
+    console.log(chalk.bold("Next step:"));
+    console.log(chalk.yellow(`  ${result.instructions}`));
+    console.log();
+    console.log(chalk.dim("The AI will follow the instructions to design your pipeline YAML."));
+    console.log(chalk.dim("No API key needed — uses your existing subscription.\n"));
+    return;
+  }
+
   console.log(chalk.bold.cyan("\n🔧 Pipeline Builder — Design Mode\n"));
   console.log(chalk.dim(`Goal: "${goal}"\n`));
 

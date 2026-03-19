@@ -22,6 +22,8 @@ program
   .option("-o, --output <path>", "Output file path", "./pipeline.yaml")
   .option("--no-interactive", "Skip clarifying questions")
   .option("--dry-run", "Generate pipeline without executing")
+  .option("-s, --subscription", "Subscription mode: generates instructions for Claude Code/Cursor instead of calling API")
+  .option("--target <target>", "Subscription target: claude-code, cursor, or both", "both")
   .action(planCommand);
 
 program
