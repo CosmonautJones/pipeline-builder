@@ -37,6 +37,11 @@
     "typescript": "^5.7.0",
     "vitest": "^2.1.0"
   },
+  "files": [
+    "dist",
+    "docs",
+    "templates"
+  ],
   "engines": {
     "node": ">=20"
   }
