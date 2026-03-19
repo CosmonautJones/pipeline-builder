@@ -8,6 +8,13 @@ import { createChildLogger } from "../utils/logger.js";
 import { StepExecutionError, PipelineTimeoutError, DAGValidationError } from "../utils/errors.js";
 import { safeEvaluate } from "../utils/safe-eval.js";
 
+/** Default number of pipeline nodes to execute concurrently. */
+const DEFAULT_CONCURRENCY = 5;
+/** Default delay between retry attempts in milliseconds. */
+const DEFAULT_RETRY_BACKOFF_MS = 1000;
+/** Default multiplier applied to backoff delay on each subsequent retry. */
+const DEFAULT_RETRY_BACKOFF_MULTIPLIER = 2;
+
 export interface StepHandler {
   (nodeId: string, inputs: Record<string, unknown>): Promise<Record<string, unknown>>;
 }
@@ -81,36 +88,15 @@ export class PipelineRuntime {
       timeoutId = setTimeout(() => this.abortController?.abort(), timeoutMs);
     }
 
-    const concurrency = options?.concurrency ?? 5;
+    const concurrency = options?.concurrency ?? DEFAULT_CONCURRENCY;
 
     try {
       // Main execution loop
       while (!scheduler.isComplete()) {
-        if (this.abortController.signal.aborted) {
-          throw new PipelineTimeoutError(stateManager.executionId, timeoutMs ?? 0);
-        }
-
-        const readyNodes = scheduler.getReadyNodes();
-        if (readyNodes.length === 0) {
-          // No nodes ready and not complete — deadlock or waiting for human
-          const waiting = stateManager.getNodesByStatus("waiting-human");
-          if (waiting.length > 0) {
-            // Wait for human approval
-            await this.handleHumanReview(waiting, pipeline, stateManager, options);
-            continue;
-          }
-          // True deadlock
-          this.logger.error("Execution deadlocked — no runnable nodes");
-          break;
-        }
-
-        // Execute ready nodes in parallel (up to concurrency limit)
-        const batch = readyNodes.slice(0, concurrency);
-        await Promise.all(
-          batch.map(nodeId =>
-            this.executeNode(nodeId, pipeline, stateManager, scheduler, variables, options)
-          )
+        const shouldBreak = await this.processNextBatch(
+          scheduler, stateManager, pipeline, variables, options, concurrency, timeoutMs,
         );
+        if (shouldBreak) break;
       }
 
       // Determine final status
@@ -141,6 +127,43 @@ export class PipelineRuntime {
   }
 
   // ── Private ─────────────────────────────────────────────────────
+
+  /**
+   * Process the next batch of ready nodes. Returns true if the loop should break (deadlock).
+   */
+  private async processNextBatch(
+    scheduler: Scheduler,
+    stateManager: StateManager,
+    pipeline: PipelineDefinition,
+    variables: Record<string, unknown>,
+    options: ExecutionOptions | undefined,
+    concurrency: number,
+    timeoutMs: number | undefined,
+  ): Promise<boolean> {
+    if (this.abortController!.signal.aborted) {
+      throw new PipelineTimeoutError(stateManager.executionId, timeoutMs ?? 0);
+    }
+
+    const readyNodes = scheduler.getReadyNodes();
+
+    if (readyNodes.length === 0) {
+      const waiting = stateManager.getNodesByStatus("waiting-human");
+      if (waiting.length > 0) {
+        await this.handleHumanReview(waiting, pipeline, stateManager, options);
+        return false;
+      }
+      this.logger.error("Execution deadlocked — no runnable nodes");
+      return true;
+    }
+
+    const batch = readyNodes.slice(0, concurrency);
+    await Promise.all(
+      batch.map(nodeId =>
+        this.executeNode(nodeId, pipeline, stateManager, scheduler, variables, options)
+      )
+    );
+    return false;
+  }
 
   private async executeNode(
     nodeId: string,
@@ -211,7 +234,7 @@ export class PipelineRuntime {
         lastError = error instanceof Error ? error : new Error(String(error));
 
         if (attempt < maxAttempts) {
-          const backoff = (node.retry?.backoffMs ?? 1000) * Math.pow(node.retry?.backoffMultiplier ?? 2, attempt - 1);
+          const backoff = (node.retry?.backoffMs ?? DEFAULT_RETRY_BACKOFF_MS) * Math.pow(node.retry?.backoffMultiplier ?? DEFAULT_RETRY_BACKOFF_MULTIPLIER, attempt - 1);
           options?.onLog?.("warn", `Node ${nodeId} attempt ${attempt} failed, retrying in ${backoff}ms`);
           await new Promise(resolve => setTimeout(resolve, backoff));
         }

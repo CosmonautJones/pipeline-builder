@@ -1,5 +1,5 @@
 import { readFile, writeFile, mkdir, readdir, unlink } from "node:fs/promises";
-import { join, extname, basename } from "node:path";
+import { join, extname, basename, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import YAML from "yaml";
 import type { PipelineDefinition } from "../types/pipeline.js";
@@ -61,7 +61,14 @@ export class PipelineStore {
       filepath = match;
     }
 
-    const content = await readFile(filepath, "utf-8");
+    // Prevent path traversal — resolve and verify the path is within the store directory
+    const resolvedPath = resolve(filepath);
+    const resolvedDir = resolve(this.directory);
+    if (!resolvedPath.startsWith(resolvedDir + "/") && resolvedPath !== resolvedDir) {
+      throw new Error(`Access denied: path "${nameOrPath}" is outside the pipelines directory`);
+    }
+
+    const content = await readFile(resolvedPath, "utf-8");
     const ext = extname(filepath).toLowerCase();
 
     let raw: unknown;

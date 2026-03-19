@@ -36,7 +36,7 @@ export class MCPClientManager {
         const transport = new StdioClientTransport({
           command: config.command,
           args: config.args,
-          env: config.env ? { ...process.env, ...config.env } as Record<string, string> : undefined,
+          env: config.env ? MCPClientManager.buildSafeEnv(config.env) : undefined,
         });
         await client.connect(transport);
       } else {
@@ -156,6 +156,32 @@ export class MCPClientManager {
       t.name.toLowerCase().includes(lower) ||
       t.description.toLowerCase().includes(lower)
     );
+  }
+
+  /**
+   * Build a safe environment for MCP server subprocesses.
+   * Only inherits essential system vars from process.env, then overlays user config.
+   * Prevents user-provided env from overriding sensitive vars like PATH manipulation attacks.
+   */
+  private static readonly SAFE_INHERIT_VARS = [
+    "PATH", "HOME", "USER", "SHELL", "LANG", "TERM",
+    "NODE_ENV", "TMPDIR", "TMP", "TEMP",
+  ];
+
+  private static buildSafeEnv(configEnv: Record<string, string>): Record<string, string> {
+    const env: Record<string, string> = {};
+    for (const key of MCPClientManager.SAFE_INHERIT_VARS) {
+      if (process.env[key]) {
+        env[key] = process.env[key] as string;
+      }
+    }
+    // User-provided vars are overlaid but cannot override inherited system vars
+    for (const [key, value] of Object.entries(configEnv)) {
+      if (!MCPClientManager.SAFE_INHERIT_VARS.includes(key)) {
+        env[key] = value;
+      }
+    }
+    return env;
   }
 
   /**

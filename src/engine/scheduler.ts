@@ -101,6 +101,9 @@ export class Scheduler {
       if (parts.length >= 4 && parts[2] === "outputs") {
         const nodeId = parts[1];
         const field = parts.slice(3).join(".");
+        if (!this.dag.getNode(nodeId)) {
+          throw new Error(`Input mapping references unknown node "${nodeId}" in expression: ${expr}`);
+        }
         const nodeState = this.stateManager.getNodeState(nodeId);
         return nodeState?.outputs[field];
       }
