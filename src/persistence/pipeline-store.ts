@@ -61,14 +61,9 @@ export class PipelineStore {
       filepath = match;
     }
 
-    // Prevent path traversal — resolve and verify the path is within the store directory
-    const resolvedPath = resolve(filepath);
-    const resolvedDir = resolve(this.directory);
-    if (!resolvedPath.startsWith(resolvedDir + "/") && resolvedPath !== resolvedDir) {
-      throw new Error(`Access denied: path "${nameOrPath}" is outside the pipelines directory`);
-    }
+    this.assertWithinDirectory(filepath, nameOrPath);
 
-    const content = await readFile(resolvedPath, "utf-8");
+    const content = await readFile(resolve(filepath), "utf-8");
     const ext = extname(filepath).toLowerCase();
 
     let raw: unknown;
@@ -103,8 +98,17 @@ export class PipelineStore {
       f === nameOrPath || basename(f).startsWith(this.sanitizeFilename(nameOrPath))
     );
     if (match) {
+      this.assertWithinDirectory(match, nameOrPath);
       await unlink(match);
       this.logger.info(`Deleted pipeline: ${match}`);
+    }
+  }
+
+  private assertWithinDirectory(filepath: string, originalInput: string): void {
+    const resolvedPath = resolve(filepath);
+    const resolvedDir = resolve(this.directory);
+    if (!resolvedPath.startsWith(resolvedDir + "/") && resolvedPath !== resolvedDir) {
+      throw new Error(`Access denied: path "${originalInput}" is outside the pipelines directory`);
     }
   }
 

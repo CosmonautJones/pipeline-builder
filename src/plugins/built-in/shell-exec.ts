@@ -1,68 +1,12 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { parseArgsStringToArgv } from "string-argv";
 import type { PipelinePlugin } from "../plugin-api.js";
 
 const execFileAsync = promisify(execFile);
 
 /** Default timeout for shell commands in milliseconds (5 minutes). */
 const DEFAULT_SHELL_TIMEOUT_MS = 300_000;
-
-/**
- * Parse a shell command string into an array of arguments.
- * Handles single quotes, double quotes (with backslash escapes), and unquoted tokens.
- */
-function parseCommand(command: string): string[] {
-  const args: string[] = [];
-  let current = "";
-  let i = 0;
-
-  while (i < command.length) {
-    const ch = command[i];
-
-    if (ch === " " || ch === "\t") {
-      if (current.length > 0) {
-        args.push(current);
-        current = "";
-      }
-      i++;
-    } else if (ch === "'") {
-      // Single-quoted: literal until closing quote (no escape handling)
-      i++;
-      while (i < command.length && command[i] !== "'") {
-        current += command[i++];
-      }
-      i++; // skip closing quote
-    } else if (ch === '"') {
-      // Double-quoted: supports backslash escapes
-      i++;
-      while (i < command.length && command[i] !== '"') {
-        if (command[i] === "\\" && i + 1 < command.length) {
-          i++;
-          current += command[i++];
-        } else {
-          current += command[i++];
-        }
-      }
-      i++; // skip closing quote
-    } else if (ch === "\\" && i + 1 < command.length) {
-      // Backslash escape outside quotes
-      i++;
-      current += command[i++];
-    } else {
-      current += command[i++];
-    }
-  }
-
-  if (current.length > 0) {
-    args.push(current);
-  }
-
-  if (args.length === 0) {
-    throw new Error("Empty command");
-  }
-
-  return args;
-}
 
 /**
  * Built-in shell execution plugin.
@@ -100,9 +44,9 @@ export const shellExecPlugin: PipelinePlugin = {
 
     try {
       // Split command into program + args for execFile (safer than exec)
-      const parts = parseCommand(command);
-      const program = parts[0];
-      const args = parts.slice(1);
+      const argv = parseArgsStringToArgv(command);
+      const program = argv[0];
+      const args = argv.slice(1);
 
       const { stdout, stderr } = await execFileAsync(program, args, {
         cwd,

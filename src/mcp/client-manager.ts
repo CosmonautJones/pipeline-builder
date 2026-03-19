@@ -163,9 +163,23 @@ export class MCPClientManager {
    * Only inherits essential system vars from process.env, then overlays user config.
    * Prevents user-provided env from overriding sensitive vars like PATH manipulation attacks.
    */
+  /** System vars inherited from the parent process into MCP server subprocesses. */
   private static readonly SAFE_INHERIT_VARS = [
     "PATH", "HOME", "USER", "SHELL", "LANG", "TERM",
     "NODE_ENV", "TMPDIR", "TMP", "TEMP",
+  ];
+
+  /** Env vars that user config must never be allowed to set (security-sensitive). */
+  private static readonly BLOCKED_USER_VARS = [
+    // Inherited system vars — prevent override
+    ...MCPClientManager.SAFE_INHERIT_VARS,
+    // Dynamic linker injection
+    "LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH",
+    // Node.js execution manipulation
+    "NODE_OPTIONS", "NODE_PATH", "NODE_EXTRA_CA_CERTS",
+    // Credential/proxy hijacking
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+    "http_proxy", "https_proxy", "all_proxy", "no_proxy",
   ];
 
   private static buildSafeEnv(configEnv: Record<string, string>): Record<string, string> {
@@ -175,9 +189,8 @@ export class MCPClientManager {
         env[key] = process.env[key] as string;
       }
     }
-    // User-provided vars are overlaid but cannot override inherited system vars
     for (const [key, value] of Object.entries(configEnv)) {
-      if (!MCPClientManager.SAFE_INHERIT_VARS.includes(key)) {
+      if (!MCPClientManager.BLOCKED_USER_VARS.includes(key)) {
         env[key] = value;
       }
     }
