@@ -166,6 +166,15 @@ export class PipelineRuntime {
 
     // Handle human-review nodes
     if (node.type === "human-review") {
+      // In dry-run mode, auto-approve all human review gates
+      if (options?.dryRun) {
+        stateManager.setNodeStatus(nodeId, "completed");
+        stateManager.setNodeOutputs(nodeId, { approved: true, dryRun: true });
+        this.emitEvent(stateManager.executionId, "node-completed", { nodeId });
+        options?.onStepComplete?.(nodeId, { approved: true, dryRun: true });
+        options?.onLog?.("info", `Auto-approved "${nodeId}" (dry-run mode)`);
+        return;
+      }
       stateManager.setNodeStatus(nodeId, "waiting-human");
       this.emitEvent(stateManager.executionId, "human-review-needed", { nodeId });
       return;
@@ -232,7 +241,12 @@ export class PipelineRuntime {
   ): Promise<void> {
     for (const nodeId of waitingNodes) {
       const node = pipeline.nodes.find(n => n.id === nodeId);
-      const prompt = node?.humanReview?.prompt ?? `Approve step "${nodeId}"?`;
+      const rawPrompt = node?.humanReview?.prompt ?? `Approve step "${nodeId}"?`;
+      // Resolve template variables in the prompt
+      const prompt = rawPrompt.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, name: string) => {
+        const val = stateManager.getState().variables[name];
+        return val !== undefined ? String(val) : `{{ ${name} }}`;
+      });
 
       if (options?.onHumanReview) {
         const approved = await options.onHumanReview(nodeId, prompt);
