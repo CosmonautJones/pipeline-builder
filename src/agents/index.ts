@@ -8,3 +8,6 @@ export { ArchitectAgent } from "./architect/index.js";
 export { BuilderAgent } from "./builder/index.js";
 export { ValidatorAgent } from "./validator/index.js";
 export { RouterAgent } from "./router/index.js";
+export { IntentParserAgent } from "./intent-parser/index.js";
+export { ToolDiscoveryAgent } from "./discovery/index.js";
+export type { DiscoveryResult } from "./discovery/index.js";

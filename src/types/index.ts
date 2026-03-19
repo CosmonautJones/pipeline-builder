@@ -28,6 +28,7 @@ export type {
   ValidationIssue,
   ClarificationQuestion,
   ParsedIntent,
+  RequiredConnection,
   OrchestratorPhase,
 } from "./agent.js";
 

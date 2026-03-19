@@ -71,8 +71,15 @@ ${plan ? JSON.stringify(plan, null, 2) : "No plan available"}
 ## Original Goal:
 ${context.currentIntent?.goal ?? "Not specified"}
 
-## Available MCP Tools:
-${context.availableTools.slice(0, 30).map(t => `- ${t.server}:${t.name} — ${t.description}`).join("\n") || "Use generic tool references"}
+## Available MCP Tools (USE THESE — they are real and connected):
+${context.availableTools.slice(0, 40).map(t => `- ${t.server}:${t.name} — ${t.description}`).join("\n") || "No tools connected — use shell:exec as fallback for commands"}
+
+IMPORTANT: Only reference tools from the list above. For any node that needs a tool not in this list,
+use "shell:exec" with the appropriate command as a fallback. This ensures the pipeline is executable.
+
+${context.feedbackHistory.length > 0 ? `## Feedback from previous iterations:
+${context.feedbackHistory.map((f, i) => `${i + 1}. ${f}`).join("\n")}
+Address ALL feedback points above.` : ""}
 
 ${context.currentPipeline ? `## Previous pipeline draft (to improve):
 ${JSON.stringify(context.currentPipeline, null, 2)}` : ""}

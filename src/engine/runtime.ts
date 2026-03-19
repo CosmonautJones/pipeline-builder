@@ -6,6 +6,7 @@ import { Scheduler } from "./scheduler.js";
 import { TypedEventBus } from "../utils/event-bus.js";
 import { createChildLogger } from "../utils/logger.js";
 import { StepExecutionError, PipelineTimeoutError, DAGValidationError } from "../utils/errors.js";
+import { safeEvaluate } from "../utils/safe-eval.js";
 
 export interface StepHandler {
   (nodeId: string, inputs: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -246,16 +247,7 @@ export class PipelineRuntime {
   }
 
   private evaluateCondition(condition: string, variables: Record<string, unknown>): boolean {
-    try {
-      // Simple expression evaluation with variable substitution
-      const resolved = condition.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, name: string) => {
-        return JSON.stringify(variables[name]);
-      });
-      // Evaluate simple boolean expressions safely
-      return Boolean(new Function("variables", `with(variables) { return ${resolved}; }`)(variables));
-    } catch {
-      return true; // Default to running on evaluation failure
-    }
+    return safeEvaluate(condition, variables);
   }
 
   private emitEvent(executionId: string, type: ExecutionEvent["type"], data?: unknown): void {

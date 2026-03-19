@@ -3,3 +3,4 @@ export { PipelineBuilderError, DAGCycleError, DAGValidationError, StepExecutionE
 export { logger, createChildLogger } from "./logger.js";
 export type { Logger } from "./logger.js";
 export { TypedEventBus } from "./event-bus.js";
+export { safeEvaluate } from "./safe-eval.js";

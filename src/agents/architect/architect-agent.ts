@@ -75,6 +75,8 @@ Return the blueprint as JSON:
     const plan = context.currentPlan;
     const tools = context.availableTools;
 
+    const connections = context.requiredConnections;
+
     return `Design a pipeline topology from this task plan:
 
 ## Task Plan:
@@ -83,8 +85,16 @@ ${plan ? JSON.stringify(plan, null, 2) : "No plan available — design from inte
 ## Original Goal:
 ${context.currentIntent?.goal ?? "Not specified"}
 
+## Required Connections (from intent analysis):
+${connections.length > 0
+  ? connections.map(c => `- ${c.system} (${c.connectionType}): ${c.purpose}`).join("\n")
+  : "None identified — infer from the goal"}
+
 ## Available MCP Tools (${tools.length}):
-${tools.slice(0, 30).map(t => `- ${t.server}:${t.name} — ${t.description}`).join("\n") || "No tools available — use generic tool hints"}
+${tools.slice(0, 40).map(t => `- ${t.server}:${t.name} — ${t.description}`).join("\n") || "No tools available — use generic tool hints"}
+
+IMPORTANT: When specifying tool hints, prefer tools from the Available MCP Tools list above.
+If a required capability has no matching tool, add it to missingCapabilities so the discovery agent can find it.
 
 ## Conversation context:
 ${context.messages.slice(-10).map(m => `[${m.from}→${m.to}] ${m.content}`).join("\n") || "No prior context"}

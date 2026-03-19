@@ -21,6 +21,7 @@ export type OrchestratorPhase =
   | "building"       // Generating pipeline definition
   | "validating"     // Checking correctness
   | "reviewing"      // User approval gate
+  | "discovering"    // Finding/installing missing tools
   | "executing"      // Running the pipeline
   | "complete";
 
@@ -49,6 +50,8 @@ export interface AgentContext {
   currentBlueprint?: PipelineBlueprint;
   currentPipeline?: PipelineDefinition;
   availableTools: ToolDefinition[];
+  requiredConnections: RequiredConnection[];
+  feedbackHistory: string[];
   variables: Record<string, unknown>;
   iteration: number;
   maxIterations: number;
@@ -75,6 +78,12 @@ export interface AgentResult {
 
 // ── Parsed Intent (output of intent parsing) ────────────────────────
 
+export interface RequiredConnection {
+  system: string;
+  purpose: string;
+  connectionType: "api" | "database" | "filesystem" | "messaging" | "shell" | "mcp" | "other";
+}
+
 export interface ParsedIntent {
   rawInput: string;
   goal: string;
@@ -83,6 +92,7 @@ export interface ParsedIntent {
   constraints: string[];
   preferences: string[];
   suggestedTools: string[];
+  requiredConnections?: RequiredConnection[];
   domain?: string;                // e.g., "ci-cd", "data-processing", "content"
   confidence: number;             // 0–1
 }
